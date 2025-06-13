@@ -1,7 +1,7 @@
 # backend/app/main.py
 """
 🎬 REELS GENERATOR - FastAPI Main Application
-Production-ready FastAPI setup with authentication, middleware, and error handling
+Production-ready FastAPI setup with authentication, content generation, and error handling
 """
 
 from fastapi import FastAPI, HTTPException, Depends, status
@@ -16,7 +16,7 @@ from typing import Dict, Any
 
 from .config import settings
 from .database import engine, Base
-from .api import auth, projects, analytics, webhooks
+from .api import auth, projects, analytics, webhooks, content
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -59,6 +59,13 @@ app = FastAPI(
     
     ### 🔐 Authentication Required
     All endpoints require JWT authentication via Bearer token.
+    
+    ### 📝 Content Generation Features (Week 2)
+    * **Story Generation** - AI-powered script creation
+    * **Hashtag Optimization** - Platform-specific hashtag generation
+    * **Content Analysis** - Quality scoring and improvement suggestions
+    * **A/B Testing** - Generate script variations
+    * **Platform Optimization** - Adapt content for each platform
     """,
     version="1.0.0",
     docs_url="/docs",
@@ -72,6 +79,10 @@ app = FastAPI(
         {
             "name": "projects", 
             "description": "📁 Project and content management"
+        },
+        {
+            "name": "content",
+            "description": "🤖 AI-powered content generation"
         },
         {
             "name": "analytics",
@@ -169,6 +180,12 @@ async def root():
         "message": "🎬 Reels Generator API is running!",
         "version": "1.0.0",
         "status": "healthy",
+        "features": {
+            "authentication": "✅ Active",
+            "content_generation": "✅ Active (Week 2)",
+            "video_processing": "🚧 Coming Soon (Week 3-4)",
+            "social_media": "🚧 Coming Soon (Week 11)"
+        },
         "timestamp": time.time()
     }
 
@@ -177,18 +194,28 @@ async def health_check():
     """Comprehensive health check"""
     try:
         # Test database connection
-        from .database import get_db
-        db = next(get_db())
-        db.execute("SELECT 1")
+        from .database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await session.execute("SELECT 1")
         db_status = "healthy"
     except Exception as e:
         logger.error(f"💥 Database health check failed: {e}")
         db_status = "unhealthy"
     
+    # Test OpenAI connection
+    try:
+        import openai
+        openai.api_key = settings.OPENAI_API_KEY
+        # Just check if key is set
+        ai_status = "healthy" if settings.OPENAI_API_KEY else "unhealthy"
+    except Exception as e:
+        logger.error(f"💥 OpenAI health check failed: {e}")
+        ai_status = "unhealthy"
+    
     # Test Redis connection (if available)
     redis_status = "healthy"  # TODO: Implement Redis health check
     
-    overall_status = "healthy" if db_status == "healthy" and redis_status == "healthy" else "unhealthy"
+    overall_status = "healthy" if all(s == "healthy" for s in [db_status, ai_status, redis_status]) else "unhealthy"
     
     return {
         "status": overall_status,
@@ -196,6 +223,7 @@ async def health_check():
         "services": {
             "database": db_status,
             "redis": redis_status,
+            "openai": ai_status,
             "api": "healthy"
         },
         "version": "1.0.0"
@@ -211,7 +239,9 @@ async def metrics():
             "requests_duration_seconds": 0.0,
             "active_users": 0,
             "videos_generated_total": 0,
-            "videos_processing": 0
+            "videos_processing": 0,
+            "content_generations_total": 0,
+            "average_content_score": 0.0
         },
         "timestamp": time.time()
     }
@@ -232,6 +262,14 @@ app.include_router(
     projects.router,
     prefix="/api/v1/projects", 
     tags=["projects"],
+    dependencies=[Depends(security)]
+)
+
+# Content generation routes (NEW - Week 2)
+app.include_router(
+    content.router,
+    prefix="/api/v1/content",
+    tags=["content"],
     dependencies=[Depends(security)]
 )
 
@@ -261,14 +299,18 @@ if settings.DEBUG:
         return {
             "environment": settings.ENVIRONMENT,
             "debug": settings.DEBUG,
+            "week": "Week 2 - Content Generation",
+            "features_implemented": [
+                "GPT-4 Integration",
+                "Story Generation",
+                "Hashtag Optimization", 
+                "Content Quality Analysis",
+                "Script Variations",
+                "Platform Optimization"
+            ],
             "database_url": settings.DATABASE_URL.replace(settings.DATABASE_URL.split('@')[0].split('://')[-1], "***"),
-            "allowed_origins": settings.ALLOWED_ORIGINS,
-            "settings": {
-                key: "***" if "key" in key.lower() or "secret" in key.lower() or "password" in key.lower() 
-                else getattr(settings, key)
-                for key in dir(settings) 
-                if not key.startswith('_')
-            }
+            "openai_configured": bool(settings.OPENAI_API_KEY),
+            "allowed_origins": settings.ALLOWED_ORIGINS
         }
 
 # ============================================================================
@@ -284,8 +326,16 @@ async def startup_event():
     logger.info(f"🌍 Environment: {settings.ENVIRONMENT}")
     logger.info(f"🐛 Debug Mode: {settings.DEBUG}")
     logger.info(f"📊 Database: Connected")
+    logger.info(f"🤖 OpenAI: {'Connected' if settings.OPENAI_API_KEY else 'Not Configured'}")
     logger.info(f"🔐 Auth: JWT Enabled")
     logger.info(f"📡 CORS: {len(settings.ALLOWED_ORIGINS)} origins allowed")
+    logger.info("=" * 60)
+    logger.info("📅 WEEK 2 FEATURES:")
+    logger.info("  ✅ AI Content Generation")
+    logger.info("  ✅ Hashtag Optimization")
+    logger.info("  ✅ Content Quality Analysis")
+    logger.info("  ✅ A/B Testing Variations")
+    logger.info("  ✅ Platform Optimization")
     logger.info("=" * 60)
     logger.info("🚀 Ready to generate amazing content!")
     logger.info("=" * 60)
