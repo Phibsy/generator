@@ -64,3 +64,30 @@ boto3==1.34.0
 
 # === ASYNC HTTP ===
 aiohttp==3.9.1
+
+# === WEEK 5: ADVANCED VIDEO PROCESSING ===
+
+# Audio Analysis
+librosa==0.10.1
+soundfile==0.12.1
+numpy==1.24.3
+scipy==1.11.4
+
+# Video Processing
+opencv-python-headless==4.8.1.78
+imageio==2.33.0
+imageio-ffmpeg==0.4.9
+
+# WebSocket Support
+websockets==12.0
+python-socketio==5.10.0
+
+# Redis Async
+redis[hiredis]==5.0.1
+
+# Progress Tracking
+tqdm==4.66.1
+
+# Advanced Audio Processing
+pedalboard==0.8.7  # For audio effects
+pyrubberband==0.3.0  # For time stretching

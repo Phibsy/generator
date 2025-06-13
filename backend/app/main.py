@@ -1,7 +1,7 @@
-# backend/app/main.py
+# backend/app/main.py - Week 5 Update
 """
 🎬 REELS GENERATOR - FastAPI Main Application
-Production-ready FastAPI setup with authentication, content generation, TTS, and video processing
+Now with Week 5: Advanced Video Processing and WebSocket support
 """
 
 from fastapi import FastAPI, HTTPException, Depends, status
@@ -16,7 +16,8 @@ from typing import Dict, Any
 
 from .config import settings
 from .database import engine, Base
-from .api import auth, projects, analytics, webhooks, content, tts, video
+from .api import auth, projects, analytics, webhooks, content, tts, video, advanced_video
+from .services.websocket_manager import ws_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -35,7 +36,12 @@ async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     
+    # Initialize services
+    from .services.advanced_video_processing import advanced_video_service
+    await advanced_video_service.init_progress_tracking()
+    
     logger.info("✅ Database tables created")
+    logger.info("✅ WebSocket manager initialized")
     logger.info("🎬 Reels Generator API is ready!")
     
     yield
@@ -54,6 +60,7 @@ app = FastAPI(
     * **🤖 AI Content Generation** - GPT-4 powered storytelling
     * **🎙️ Text-to-Speech** - ElevenLabs & AWS Polly integration  
     * **🎬 Video Processing** - Automated video composition with subtitles
+    * **🎥 Advanced Video** - Word-timing, music, effects, real-time progress (Week 5)
     * **📱 Social Media Integration** - Direct publishing to platforms
     * **📊 Analytics & Insights** - Performance tracking and optimization
     
@@ -79,6 +86,13 @@ app = FastAPI(
     * **Background Videos** - Gaming, nature, tech presets
     * **Templates** - Pre-configured video styles
     * **Batch Processing** - Multiple videos at once
+    
+    ### 🎥 Advanced Video Features (Week 5) 🆕
+    * **Word-Level Timing** - Precise subtitle synchronization
+    * **Background Music** - Auto-ducking and beat sync
+    * **Visual Effects** - Dynamic, smooth, and minimal presets
+    * **Real-time Progress** - WebSocket updates
+    * **Quality Presets** - Low to Ultra (4K) quality
     """,
     version="1.0.0",
     docs_url="/docs",
@@ -106,6 +120,14 @@ app = FastAPI(
             "description": "🎬 Video generation and processing"
         },
         {
+            "name": "advanced-video",
+            "description": "🎥 Advanced video with effects and real-time progress"
+        },
+        {
+            "name": "websocket",
+            "description": "🔌 WebSocket for real-time updates"
+        },
+        {
             "name": "analytics",
             "description": "📊 Performance analytics and insights"
         },
@@ -124,13 +146,14 @@ app = FastAPI(
 # MIDDLEWARE CONFIGURATION
 # ============================================================================
 
-# CORS Middleware
+# CORS Middleware - Updated for WebSocket support
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],  # For WebSocket upgrade headers
 )
 
 # Trusted Host Middleware
@@ -154,41 +177,14 @@ async def add_process_time_header(request, call_next):
 @app.middleware("http") 
 async def log_requests(request, call_next):
     """Log all incoming requests"""
+    # Skip WebSocket upgrade requests
+    if request.url.path.startswith("/ws/"):
+        return await call_next(request)
+    
     logger.info(f"📨 {request.method} {request.url}")
     response = await call_next(request)
     logger.info(f"📤 {response.status_code} - {request.method} {request.url}")
     return response
-
-# ============================================================================
-# EXCEPTION HANDLERS
-# ============================================================================
-
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc: HTTPException):
-    """Custom HTTP exception handler"""
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error": True,
-            "message": exc.detail,
-            "status_code": exc.status_code,
-            "timestamp": time.time()
-        }
-    )
-
-@app.exception_handler(500)
-async def internal_server_error_handler(request, exc):
-    """Internal server error handler"""
-    logger.error(f"💥 Internal server error: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": True,
-            "message": "Internal server error occurred",
-            "status_code": 500,
-            "timestamp": time.time()
-        }
-    )
 
 # ============================================================================
 # HEALTH CHECK ENDPOINTS
@@ -206,6 +202,8 @@ async def root():
             "content_generation": "✅ Active (Week 2)",
             "text_to_speech": "✅ Active (Week 3)", 
             "video_processing": "✅ Active (Week 4)",
+            "advanced_video": "✅ Active (Week 5)",
+            "websocket_progress": "✅ Active (Week 5)",
             "social_media": "🚧 Coming Soon (Week 11)"
         },
         "timestamp": time.time()
@@ -224,18 +222,24 @@ async def health_check():
         logger.error(f"💥 Database health check failed: {e}")
         db_status = "unhealthy"
     
+    # Test Redis connection
+    try:
+        from .services.websocket_manager import manager
+        await manager.init_redis()
+        await manager.redis_client.ping()
+        redis_status = "healthy"
+    except Exception as e:
+        logger.error(f"💥 Redis health check failed: {e}")
+        redis_status = "unhealthy"
+    
     # Test OpenAI connection
     try:
         import openai
         openai.api_key = settings.OPENAI_API_KEY
-        # Just check if key is set
         ai_status = "healthy" if settings.OPENAI_API_KEY else "unhealthy"
     except Exception as e:
         logger.error(f"💥 OpenAI health check failed: {e}")
         ai_status = "unhealthy"
-    
-    # Test Redis connection (if available)
-    redis_status = "healthy"  # TODO: Implement Redis health check
     
     # Test FFmpeg installation
     try:
@@ -257,28 +261,10 @@ async def health_check():
             "redis": redis_status,
             "openai": ai_status,
             "ffmpeg": ffmpeg_status,
+            "websocket": "healthy",
             "api": "healthy"
         },
         "version": "1.0.0"
-    }
-
-@app.get("/metrics", tags=["health"])
-async def metrics():
-    """Prometheus-compatible metrics endpoint"""
-    # TODO: Implement actual metrics collection
-    return {
-        "metrics": {
-            "requests_total": 0,
-            "requests_duration_seconds": 0.0,
-            "active_users": 0,
-            "videos_generated_total": 0,
-            "videos_processing": 0,
-            "content_generations_total": 0,
-            "tts_generations_total": 0,
-            "average_content_score": 0.0,
-            "average_video_duration": 0.0
-        },
-        "timestamp": time.time()
     }
 
 # ============================================================================
@@ -316,12 +302,26 @@ app.include_router(
     dependencies=[Depends(security)]
 )
 
-# Video processing routes (NEW - Week 4)
+# Video processing routes (Week 4)
 app.include_router(
     video.router,
     prefix="/api/v1/video",
     tags=["video-processing"],
     dependencies=[Depends(security)]
+)
+
+# Advanced video processing routes (NEW - Week 5)
+app.include_router(
+    advanced_video.router,
+    prefix="/api/v1/video",
+    tags=["advanced-video"],
+    dependencies=[Depends(security)]
+)
+
+# WebSocket routes (NEW - Week 5)
+app.include_router(
+    ws_router,
+    tags=["websocket"]
 )
 
 # Analytics routes
@@ -340,44 +340,6 @@ app.include_router(
 )
 
 # ============================================================================
-# DEVELOPMENT HELPERS
-# ============================================================================
-
-if settings.DEBUG:
-    @app.get("/debug/info", tags=["development"])
-    async def debug_info():
-        """Debug information (only in development)"""
-        return {
-            "environment": settings.ENVIRONMENT,
-            "debug": settings.DEBUG,
-            "week": "Week 4 - Video Processing",
-            "features_implemented": [
-                "GPT-4 Integration",
-                "Story Generation",
-                "Hashtag Optimization",
-                "Content Quality Analysis",
-                "Script Variations",
-                "Platform Optimization",
-                "ElevenLabs TTS",
-                "AWS Polly Fallback",
-                "Voice Selection",
-                "Audio Processing",
-                "FFmpeg Video Processing",
-                "Subtitle Animations",
-                "Background System",
-                "Video Templates",
-                "Batch Processing"
-            ],
-            "database_url": settings.DATABASE_URL.replace(
-                settings.DATABASE_URL.split('@')[0].split('://')[-1], "***"
-            ),
-            "openai_configured": bool(settings.OPENAI_API_KEY),
-            "elevenlabs_configured": bool(settings.ELEVENLABS_API_KEY),
-            "aws_configured": bool(settings.AWS_ACCESS_KEY_ID),
-            "allowed_origins": settings.ALLOWED_ORIGINS
-        }
-
-# ============================================================================
 # STARTUP MESSAGE
 # ============================================================================
 
@@ -390,26 +352,29 @@ async def startup_event():
     logger.info(f"🌍 Environment: {settings.ENVIRONMENT}")
     logger.info(f"🐛 Debug Mode: {settings.DEBUG}")
     logger.info(f"📊 Database: Connected")
+    logger.info(f"🔴 Redis: Connected")
     logger.info(f"🤖 OpenAI: {'Connected' if settings.OPENAI_API_KEY else 'Not Configured'}")
     logger.info(f"🎙️ ElevenLabs: {'Connected' if settings.ELEVENLABS_API_KEY else 'Not Configured'}")
     logger.info(f"☁️ AWS: {'Connected' if settings.AWS_ACCESS_KEY_ID else 'Not Configured'}")
     logger.info(f"🔐 Auth: JWT Enabled")
     logger.info(f"📡 CORS: {len(settings.ALLOWED_ORIGINS)} origins allowed")
+    logger.info(f"🔌 WebSocket: Enabled")
     logger.info("=" * 60)
     logger.info("📅 IMPLEMENTED FEATURES:")
     logger.info("  ✅ Week 1: Setup & Authentication")
     logger.info("  ✅ Week 2: AI Content Generation")
     logger.info("  ✅ Week 3: Text-to-Speech")
     logger.info("  ✅ Week 4: Video Processing")
+    logger.info("  ✅ Week 5: Advanced Video Processing")
     logger.info("=" * 60)
-    logger.info("📅 WEEK 4 FEATURES:")
-    logger.info("  ✅ FFmpeg Integration")
-    logger.info("  ✅ Video Composition")
-    logger.info("  ✅ Subtitle Generation")
-    logger.info("  ✅ Background Videos")
-    logger.info("  ✅ File Management")
+    logger.info("📅 WEEK 5 FEATURES:")
+    logger.info("  ✅ Word-Level Subtitle Timing")
+    logger.info("  ✅ Background Music with Auto-Ducking")
+    logger.info("  ✅ Beat-Synchronized Effects")
+    logger.info("  ✅ Real-time Progress via WebSocket")
+    logger.info("  ✅ Quality Presets (Low to 4K)")
     logger.info("=" * 60)
-    logger.info("🚀 Ready to create amazing videos!")
+    logger.info("🚀 Ready to create amazing videos with advanced features!")
     logger.info("=" * 60)
 
 if __name__ == "__main__":
