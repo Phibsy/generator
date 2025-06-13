@@ -314,3 +314,36 @@ class PaginatedResponse(BaseModel):
     pages: int
     has_next: bool
     has_prev: bool
+
+# Add to backend/app/schemas.py
+
+# ============================================================================
+# TEXT-TO-SPEECH SCHEMAS
+# ============================================================================
+
+class TTSRequest(BaseModel):
+    """Schema for TTS generation request"""
+    text: str = Field(..., min_length=1, max_length=5000)
+    voice_id: str = Field(default="rachel")
+    speed: float = Field(default=1.0, ge=0.5, le=2.0)
+
+class TTSResponse(BaseModel):
+    """Schema for TTS generation response"""
+    audio_url: str
+    duration: float
+    provider: str
+    voice_id: str
+    file_key: str
+
+class VoiceInfo(BaseModel):
+    """Schema for voice information"""
+    voice_id: str
+    name: str
+    description: str
+    provider: str  # elevenlabs, polly, or both
+    preview_url: str
+    
+class VoiceCloneRequest(BaseModel):
+    """Schema for voice cloning request"""
+    voice_name: str = Field(..., min_length=3, max_length=50)
+    description: str = Field(..., max_length=200)

@@ -17,6 +17,7 @@ from typing import Dict, Any
 from .config import settings
 from .database import engine, Base
 from .api import auth, projects, analytics, webhooks, content
+from .api import tts
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -270,6 +271,14 @@ app.include_router(
     content.router,
     prefix="/api/v1/content",
     tags=["content"],
+    dependencies=[Depends(security)]
+)
+
+# Add TTS routes after content routes
+app.include_router(
+    tts.router,
+    prefix="/api/v1/tts",
+    tags=["text-to-speech"],
     dependencies=[Depends(security)]
 )
 
